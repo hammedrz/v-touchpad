@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=V-Touchpad
+GenericName=On-screen Touchpad
+Comment=Use part of your touchscreen as a laptop touchpad
+Exec=v-touchpad
+Icon=v-touchpad
+Terminal=false
+Categories=Utility;Accessibility;
+Keywords=touchpad;trackpad;mouse;pointer;touchscreen;tablet;
+StartupWMClass=v-touchpad

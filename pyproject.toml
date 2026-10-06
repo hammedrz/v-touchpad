@@ -1,0 +1,12 @@
+[project]
+name = "v-touchpad"
+version = "0.1.0"
+description = "An on-screen touchpad for Linux touchscreens"
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "Hamed" }]
+requires-python = ">=3.10"
+dependencies = [
+    "PySide6-Essentials>=6.6",
+    "evdev>=1.7",
+]
