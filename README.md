@@ -30,7 +30,7 @@ It needs a touchscreen, since the window only reacts to touch, and a desktop tha
 
 ### Ubuntu and Debian: .deb package
 
-Download `v-touchpad_<version>_all.deb` from the releases page and install it with apt, which also pulls in the dependencies:
+Download `v-touchpad_<version>_all.deb` from the [releases page](https://github.com/hammedrz/v-touchpad/releases) and install it with apt, which also pulls in the dependencies:
 
 ```sh
 sudo apt install ./v-touchpad_0.1.0_all.deb
@@ -43,7 +43,7 @@ The package uses the distro's own PySide6, so it needs Ubuntu 24.10 or newer (26
 ### Any distro: install script
 
 ```sh
-git clone <repository-url> v-touchpad
+git clone https://github.com/hammedrz/v-touchpad.git
 cd v-touchpad
 ./install.sh              # add --autostart to start it in the tray at login
 ```
