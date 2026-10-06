@@ -51,6 +51,8 @@ To remove it: `./uninstall.sh` (add `--system` to also undo the `sudo` setup).
 
 Open **V-Touchpad** from the app menu, or run `v-touchpad`. Opening it again while it runs in the tray brings the pad back.
 
+Clicking the tray icon shows or hides the pad. On Ubuntu's GNOME, the tray extension opens the menu on a single click instead, so double-click or middle-click the icon to show or hide the pad there.
+
 The tray icon's menu has:
 
 - **Show / Hide touchpad**

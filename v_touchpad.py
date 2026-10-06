@@ -460,7 +460,10 @@ class Controller(QObject):
         QApplication.quit()
 
     def _on_tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
-        if reason == QSystemTrayIcon.ActivationReason.Trigger:
+        # Most trays send Trigger on a left click. Ubuntu's AppIndicator extension
+        # opens the menu on a left click and sends Trigger only on a double-click.
+        if reason in (QSystemTrayIcon.ActivationReason.Trigger,
+                      QSystemTrayIcon.ActivationReason.MiddleClick):
             self.toggle_window()
 
     def _on_connection(self) -> None:
