@@ -17,7 +17,8 @@ usage() {
     cat <<EOF
 Usage: ./install.sh [--autostart] [--system | --no-system]
 
-  --autostart   also start V-Touchpad when you log in
+  --autostart   start V-Touchpad in the tray when you log in
+                (also available later from the tray menu: "Start at login")
   --system      do the system setup (sudo) without asking
   --no-system   skip the system setup (/dev/uinput access, tablet-mode quirk)
 EOF
@@ -59,7 +60,7 @@ fi
 say "Installing to $APP_DIR"
 mkdir -p "$APP_DIR/data" "$BIN_DIR"
 install -m 644 "$SRC/v_touchpad.py" "$SRC/requirements.txt" "$APP_DIR/"
-install -m 644 "$SRC/data/$APP.svg" "$APP_DIR/data/"
+install -m 644 "$SRC/data/$APP.svg" "$SRC/data/$APP-tray.svg" "$APP_DIR/data/"
 
 say "Installing Python libraries (PySide6, evdev); this can take a minute"
 rm -rf "$APP_DIR/venv"
@@ -89,7 +90,9 @@ command -v gtk-update-icon-cache >/dev/null && gtk-update-icon-cache -qtf "$DATA
 if ((autostart)); then
     say "Starting V-Touchpad at login"
     mkdir -p "$CONFIG_HOME/autostart"
-    cp "$DATA_HOME/applications/$APP.desktop" "$CONFIG_HOME/autostart/$APP.desktop"
+    # Same entry as the tray menu's "Start at login" writes.
+    printf '[Desktop Entry]\nType=Application\nName=V-Touchpad\nComment=Start V-Touchpad in the tray\nExec="%s" --hidden\nIcon=%s\nTerminal=false\nX-GNOME-Autostart-enabled=true\n' \
+        "$BIN_DIR/$APP" "$APP" > "$CONFIG_HOME/autostart/$APP.desktop"
 fi
 
 # --- System setup (sudo) ----------------------------------------------------

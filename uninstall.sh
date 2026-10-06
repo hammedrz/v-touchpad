@@ -22,6 +22,7 @@ rm -f "$HOME/.local/bin/$APP" \
       "$DATA_HOME/applications/$APP.desktop" \
       "$DATA_HOME/icons/hicolor/scalable/apps/$APP.svg" \
       "$CONFIG_HOME/autostart/$APP.desktop"
+rm -rf "$CONFIG_HOME/$APP"  # settings
 command -v update-desktop-database >/dev/null && update-desktop-database -q "$DATA_HOME/applications" || true
 echo "Removed V-Touchpad."
 

@@ -14,6 +14,7 @@ An on-screen touchpad for Linux touchscreens. It puts a small floating window on
 - **Stays out of the way.** The window floats above other windows and never takes keyboard focus away from the app you're using.
 - **Light and dark mode** that follow your desktop. Tap the half-circle icon in the top bar to switch by hand.
 - **Movable.** Drag the top bar (the one with the small handle) to move it.
+- **Lives in the tray.** Show or hide the pad from its tray icon, and turn on *Start at login* to have it waiting in the tray after you log in. Closing the window asks whether to hide it to the tray or quit, and can remember your answer.
 
 ## Compatibility
 
@@ -30,7 +31,7 @@ It needs a touchscreen, since the window only reacts to touch, and a desktop tha
 ```sh
 git clone <repository-url> v-touchpad
 cd v-touchpad
-./install.sh              # add --autostart to start it at login
+./install.sh              # add --autostart to start it in the tray at login
 ```
 
 The installer:
@@ -48,12 +49,22 @@ To remove it: `./uninstall.sh` (add `--system` to also undo the `sudo` setup).
 
 ## Usage
 
-Open **V-Touchpad** from the app menu, or run `v-touchpad`.
+Open **V-Touchpad** from the app menu, or run `v-touchpad`. Opening it again while it runs in the tray brings the pad back.
+
+The tray icon's menu has:
+
+- **Show / Hide touchpad**
+- **Start at login**: starts V-Touchpad in the tray (pad hidden) when you log in.
+- **When closing the window**: *Ask every time*, *Hide to tray* or *Quit*. This is where you change a choice you told the close prompt to remember.
+- **Quit**
+
+On GNOME the tray needs the AppIndicator extension, which Ubuntu enables by default (elsewhere: [AppIndicator and KStatusNotifierItem Support](https://extensions.gnome.org/extension/615/appindicator-support/)). Without a tray, closing the window quits the app.
 
 | Option | |
 | --- | --- |
 | `--speed 1.5` | Finger travel multiplier. 1.0 (default) makes the pad move the pointer like a real touchpad of the same size. Your desktop's touchpad speed setting applies too. |
 | `--theme light\|dark` | Fixed colour scheme instead of following the desktop. |
+| `--hidden` | Start in the tray without showing the pad. |
 | `--debug` | Print the touch events the window receives. |
 
 ## How it works

@@ -16,13 +16,21 @@ from pathlib import Path
 
 from evdev import AbsInfo, UInput, ecodes
 from evdev.uinput import UInputError
-from PySide6.QtCore import QEvent, QPoint, QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QEventPoint, QFont, QIcon, QPainter, QPen
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QRectF, QSettings, Qt
+from PySide6.QtGui import QActionGroup, QColor, QEventPoint, QFont, QIcon, QPainter, QPalette, QPen
+from PySide6.QtNetwork import QLocalServer, QLocalSocket
+from PySide6.QtWidgets import (QApplication, QCheckBox, QMenu, QMessageBox, QSystemTrayIcon,
+                               QWidget)
 
 APP_ID = "v-touchpad"
 VERSION = "0.1.0"
-ICON_FILE = Path(__file__).resolve().parent / "data" / f"{APP_ID}.svg"
+DATA_DIR = Path(__file__).resolve().parent / "data"
+ICON_FILE = DATA_DIR / f"{APP_ID}.svg"
+TRAY_ICON_FILE = DATA_DIR / f"{APP_ID}-tray.svg"
+CONFIG_HOME = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+AUTOSTART_FILE = CONFIG_HOME / "autostart" / f"{APP_ID}.desktop"
+LAUNCHER = Path.home() / ".local" / "bin" / APP_ID  # created by install.sh
+CLOSE_ACTIONS = {"ask": "Ask every time", "hide": "Hide to tray", "quit": "Quit"}
 
 SLOTS = 5
 RESOLUTION = 40  # device units per mm
@@ -41,9 +49,11 @@ GAP = 6
 
 THEMES = {
     "light": {"window": "#eceef1", "pad": "#ffffff", "edge": "#00000014", "button": "#dfe2e7",
-              "pressed": "#c9cdd4", "handle": "#b3b8c0", "finger": "#0000001a", "error": "#b3261e"},
+              "pressed": "#c9cdd4", "handle": "#b3b8c0", "finger": "#0000001a", "error": "#b3261e",
+              "text": "#1f2328", "accent": "#3584e4"},
     "dark": {"window": "#1b1c1f", "pad": "#26282c", "edge": "#ffffff0f", "button": "#303237",
-             "pressed": "#45484f", "handle": "#5b5f67", "finger": "#ffffff1f", "error": "#f2b8b5"},
+             "pressed": "#45484f", "handle": "#5b5f67", "finger": "#ffffff1f", "error": "#f2b8b5",
+             "text": "#e6e7ea", "accent": "#62a0ea"},
 }
 
 
@@ -229,6 +239,18 @@ class Touchpad(QWidget):
             return self.theme == "dark"
         return QApplication.styleHints().colorScheme() == Qt.ColorScheme.Dark
 
+    def palette_for_theme(self) -> QPalette:
+        """Palette for dialogs, matching the pad's light or dark look."""
+        c = {name: _color(value) for name, value in THEMES["dark" if self.is_dark() else "light"].items()}
+        palette = QPalette()
+        for role, color in ((QPalette.ColorRole.Window, c["window"]), (QPalette.ColorRole.Base, c["pad"]),
+                            (QPalette.ColorRole.Button, c["button"]), (QPalette.ColorRole.Highlight, c["accent"]),
+                            (QPalette.ColorRole.WindowText, c["text"]), (QPalette.ColorRole.Text, c["text"]),
+                            (QPalette.ColorRole.ButtonText, c["text"])):
+            palette.setColor(role, color)
+        palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#ffffff"))
+        return palette
+
     def toggle_theme(self) -> None:
         self.theme = "light" if self.is_dark() else "dark"
         self.update()
@@ -371,12 +393,151 @@ class Touchpad(QWidget):
         return True
 
 
+class Controller(QObject):
+    """Tray icon, start-at-login, the close prompt and single-instance handling."""
+
+    def __init__(self, window: Touchpad, server: QLocalServer) -> None:
+        super().__init__()
+        self.window = window
+        self.settings = QSettings(APP_ID, APP_ID)  # ~/.config/v-touchpad/v-touchpad.conf
+        self.quitting = False
+        self.server = server
+        server.newConnection.connect(self._on_connection)
+        self.tray: QSystemTrayIcon | None = None
+        window.installEventFilter(self)
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            return
+        menu = QMenu()
+        self.toggle_action = menu.addAction("Show touchpad", self.toggle_window)  # relabelled on show/hide
+        menu.addSeparator()
+        self.autostart_action = menu.addAction("Start at login")
+        self.autostart_action.setCheckable(True)
+        self.autostart_action.setChecked(AUTOSTART_FILE.exists())
+        self.autostart_action.toggled.connect(set_autostart)
+        close_menu = menu.addMenu("When closing the window")
+        self.close_group = QActionGroup(close_menu)
+        for key, label in CLOSE_ACTIONS.items():
+            action = close_menu.addAction(label)
+            action.setCheckable(True)
+            action.setData(key)
+            self.close_group.addAction(action)
+        self.close_group.triggered.connect(lambda action: self.set_close_action(action.data()))
+        self._sync_close_menu()
+        menu.addSeparator()
+        menu.addAction("Quit", self.quit)
+        self.menu = menu  # keep a reference; the tray does not own it
+
+        self.tray = QSystemTrayIcon(QIcon(str(TRAY_ICON_FILE)), self)
+        self.tray.setToolTip("V-Touchpad")
+        self.tray.setContextMenu(menu)
+        self.tray.activated.connect(self._on_tray_activated)
+        self.tray.show()
+
+    def close_action(self) -> str:
+        action = self.settings.value("close_action", "ask")
+        return action if action in CLOSE_ACTIONS else "ask"
+
+    def set_close_action(self, action: str) -> None:
+        self.settings.setValue("close_action", action)
+        self._sync_close_menu()
+
+    def _sync_close_menu(self) -> None:
+        for action in self.close_group.actions():
+            action.setChecked(action.data() == self.close_action())
+
+    def show_window(self) -> None:
+        self.window.show()
+        self.window.raise_()
+
+    def toggle_window(self) -> None:
+        if self.window.isVisible():
+            self.window.hide()
+        else:
+            self.show_window()
+
+    def quit(self) -> None:
+        self.quitting = True
+        QApplication.quit()
+
+    def _on_tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
+        if reason == QSystemTrayIcon.ActivationReason.Trigger:
+            self.toggle_window()
+
+    def _on_connection(self) -> None:
+        """Another launch of the app: show this instance's pad (unless it asked not to)."""
+        socket = self.server.nextPendingConnection()
+        socket.waitForReadyRead(500)
+        if bytes(socket.readAll().data()) != b"hidden":
+            self.show_window()
+        socket.disconnectFromServer()
+
+    def _ask_close_action(self) -> str | None:
+        box = QMessageBox(self.window)
+        box.setPalette(self.window.palette_for_theme())
+        box.setWindowTitle("Close V-Touchpad")
+        box.setText("Hide V-Touchpad to the tray, or quit it?")
+        box.setInformativeText("When hidden, it keeps running and you can bring it back from its tray icon.")
+        hide = box.addButton("Hide to tray", QMessageBox.ButtonRole.AcceptRole)
+        quit_ = box.addButton("Quit", QMessageBox.ButtonRole.DestructiveRole)
+        box.addButton("Cancel", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(hide)
+        remember = QCheckBox("Remember my choice")
+        box.setCheckBox(remember)
+        box.exec()
+        if box.clickedButton() not in (hide, quit_):
+            return None
+        action = "hide" if box.clickedButton() is hide else "quit"
+        if remember.isChecked():
+            self.set_close_action(action)
+        return action
+
+    def eventFilter(self, obj, event) -> bool:
+        if obj is self.window and event.type() in (QEvent.Type.Show, QEvent.Type.Hide) and self.tray:
+            self.toggle_action.setText("Hide touchpad" if event.type() == QEvent.Type.Show
+                                       else "Show touchpad")
+        if obj is not self.window or event.type() != QEvent.Type.Close or self.quitting:
+            return False
+        action = self.close_action() if self.tray else "quit"
+        if action == "ask":
+            action = self._ask_close_action()
+        if action == "hide":
+            self.window.hide()
+        elif action == "quit":
+            self.quit()
+        event.ignore()
+        return True
+
+
+def set_autostart(enabled: bool) -> None:
+    """Start in the tray at login, through the XDG autostart directory."""
+    if not enabled:
+        AUTOSTART_FILE.unlink(missing_ok=True)
+        return
+    if LAUNCHER.exists():
+        command = f'"{LAUNCHER}"'
+    else:
+        command = f'"{sys.executable}" "{Path(__file__).resolve()}"'
+    AUTOSTART_FILE.parent.mkdir(parents=True, exist_ok=True)
+    AUTOSTART_FILE.write_text(
+        "[Desktop Entry]\n"
+        "Type=Application\n"
+        "Name=V-Touchpad\n"
+        "Comment=Start V-Touchpad in the tray\n"
+        f"Exec={command} --hidden\n"
+        f"Icon={APP_ID}\n"
+        "Terminal=false\n"
+        "X-GNOME-Autostart-enabled=true\n"
+    )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(prog=APP_ID, description="On-screen touchpad for Linux touchscreens.")
     parser.add_argument("--speed", type=float, default=1.0,
                         help="finger travel multiplier; 1.0 matches the pad's physical size (default)")
     parser.add_argument("--theme", choices=("auto", "light", "dark"), default="auto",
                         help="colour scheme; auto follows the desktop (default)")
+    parser.add_argument("--hidden", action="store_true",
+                        help="start in the tray without showing the touchpad")
     parser.add_argument("--debug", action="store_true", help="print received touch events")
     parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
     args, qt_args = parser.parse_known_args()
@@ -391,12 +552,27 @@ def main() -> int:
     QApplication.setAttribute(Qt.ApplicationAttribute.AA_CompressHighFrequencyEvents, False)
     app = QApplication([APP_ID, *qt_args])  # argv[0] becomes the X11 WM_CLASS
     app.setApplicationName(APP_ID)
+    app.setStyle("Fusion")  # plain widgets that take the pad's light/dark palette
     app.setApplicationVersion(VERSION)
     if app.platformName() == "wayland":
         # Wayland app ID, to match windows to v-touchpad.desktop. On X11 the
         # WM_CLASS does that, and setting it there makes the portal complain.
         app.setDesktopFileName(APP_ID)
     app.setWindowIcon(QIcon.fromTheme(APP_ID, QIcon(str(ICON_FILE))))
+
+    # Only one instance: a second launch asks the running one to show its pad.
+    server_name = f"{APP_ID}-{os.getuid()}"
+    socket = QLocalSocket()
+    socket.connectToServer(server_name)
+    if socket.waitForConnected(500):
+        socket.write(b"hidden" if args.hidden else b"show")
+        socket.waitForBytesWritten(500)
+        socket.disconnectFromServer()
+        return 0
+    QLocalServer.removeServer(server_name)  # left over from a crashed instance
+    server = QLocalServer()
+    server.listen(server_name)
+
     pad = mouse = None
     error = ""
     try:
@@ -405,7 +581,10 @@ def main() -> int:
     except (OSError, UInputError) as exc:
         error = f"Cannot create virtual input devices through /dev/uinput: {exc}"
     widget = Touchpad(pad, mouse, error, args.speed, args.debug, args.theme)
-    widget.show()
+    controller = Controller(widget, server)
+    app.setQuitOnLastWindowClosed(False)  # hiding the pad keeps the tray running
+    if not (args.hidden and controller.tray):
+        widget.show()
     for device in (pad, mouse):
         if device:
             app.aboutToQuit.connect(device.close)
