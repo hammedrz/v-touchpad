@@ -113,14 +113,13 @@ if ((need_rule || need_quirk)) && [ "$system" != no ]; then
     fi
     if [[ "${answer:-y}" =~ ^[Yy]?$|^[Yy]es$ ]]; then
         if ((need_rule)); then
-            echo 'KERNEL=="uinput", SUBSYSTEM=="misc", TAG+="uaccess", OPTIONS+="static_node=uinput"' \
-                | sudo tee "$UDEV_RULE" >/dev/null
+            sudo install -m 644 "$SRC/data/60-$APP-uinput.rules" "$UDEV_RULE"
             sudo udevadm control --reload
             sudo udevadm trigger --name-match=uinput || true
         fi
         if ((need_quirk)); then
             sudo mkdir -p /etc/libinput
-            printf '# BEGIN %s\n[V-Touchpad]\nMatchName=V-Touchpad\nMatchUdevType=touchpad\nModelTabletModeNoSuspend=1\n# END %s\n' "$APP" "$APP" \
+            { echo "# BEGIN $APP"; grep -v '^#' "$SRC/data/$APP.quirks"; echo "# END $APP"; } \
                 | sudo tee -a "$QUIRKS" >/dev/null
         fi
         relogin=1

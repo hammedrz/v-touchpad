@@ -28,6 +28,20 @@ It needs a touchscreen, since the window only reacts to touch, and a desktop tha
 
 ## Install
 
+### Ubuntu and Debian: .deb package
+
+Download `v-touchpad_<version>_all.deb` from the releases page and install it with apt, which also pulls in the dependencies:
+
+```sh
+sudo apt install ./v-touchpad_0.1.0_all.deb
+```
+
+The package also sets up `/dev/uinput` access and the tablet-mode exception for 2-in-1s. On a 2-in-1, log out and back in once afterwards. Remove it with `sudo apt remove v-touchpad`.
+
+The package uses the distro's own PySide6, so it needs Ubuntu 24.10 or newer (26.04 is the first LTS) or Debian 13 or newer. It was tested on Ubuntu 26.04. On Ubuntu 24.04, use the install script below.
+
+### Any distro: install script
+
 ```sh
 git clone <repository-url> v-touchpad
 cd v-touchpad
@@ -37,7 +51,7 @@ cd v-touchpad
 The installer:
 
 - installs the app for your user only (`~/.local/share/v-touchpad`, the `v-touchpad` command and an app-menu entry);
-- asks for `sudo` once, to let your desktop user create virtual input devices (`/dev/uinput`) and to keep the pad working in tablet mode on 2-in-1s. Log out and back in afterwards.
+- asks for `sudo` once, to let your desktop user create virtual input devices (`/dev/uinput`) and to keep the pad working in tablet mode on 2-in-1s. On a 2-in-1, log out and back in afterwards.
 
 Building the `python-evdev` library needs Python 3.10+, its headers and a C compiler. If something is missing, the installer prints the right package command for your distro, for example on Ubuntu:
 
@@ -94,6 +108,8 @@ A few desktop quirks are handled for you:
 ```sh
 uv run v_touchpad.py --debug
 ```
+
+To build the .deb package (needs only `dpkg-deb`), run `packaging/build-deb.sh`. It writes `dist/v-touchpad_<version>_all.deb`, taking the version from `VERSION` in `v_touchpad.py` and the maintainer from your git name and email (override with `DEB_MAINTAINER="Name <email>"`).
 
 [uv](https://docs.astral.sh/uv/) installs the dependencies from `pyproject.toml`. If building `evdev` fails with a missing `clang`, run `CC=gcc uv run v_touchpad.py`.
 

@@ -1,0 +1,5 @@
+# V-Touchpad: keep the virtual touchpad enabled while a 2-in-1 is in tablet mode.
+[V-Touchpad]
+MatchName=V-Touchpad
+MatchUdevType=touchpad
+ModelTabletModeNoSuspend=1

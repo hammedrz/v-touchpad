@@ -29,7 +29,8 @@ ICON_FILE = DATA_DIR / f"{APP_ID}.svg"
 TRAY_ICON_FILE = DATA_DIR / f"{APP_ID}-tray.svg"
 CONFIG_HOME = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
 AUTOSTART_FILE = CONFIG_HOME / "autostart" / f"{APP_ID}.desktop"
-LAUNCHER = Path.home() / ".local" / "bin" / APP_ID  # created by install.sh
+LAUNCHERS = {Path("/usr/share") / APP_ID: Path("/usr/bin") / APP_ID,  # .deb package
+             Path.home() / ".local/share" / APP_ID: Path.home() / ".local/bin" / APP_ID}  # install.sh
 CLOSE_ACTIONS = {"ask": "Ask every time", "hide": "Hide to tray", "quit": "Quit"}
 
 SLOTS = 5
@@ -516,8 +517,9 @@ def set_autostart(enabled: bool) -> None:
     if not enabled:
         AUTOSTART_FILE.unlink(missing_ok=True)
         return
-    if LAUNCHER.exists():
-        command = f'"{LAUNCHER}"'
+    launcher = LAUNCHERS.get(Path(__file__).resolve().parent)
+    if launcher and launcher.exists():
+        command = f'"{launcher}"'
     else:
         command = f'"{sys.executable}" "{Path(__file__).resolve()}"'
     AUTOSTART_FILE.parent.mkdir(parents=True, exist_ok=True)
