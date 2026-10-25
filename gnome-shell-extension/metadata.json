@@ -1,0 +1,7 @@
+{
+  "uuid": "v-touchpad@hammedrz.github.io",
+  "name": "V-Touchpad",
+  "description": "Stops the cursor flickering while you use the V-Touchpad on-screen touchpad. GNOME hides the cursor and takes pointer focus away on every touchscreen event; while the pad is open, this keeps pointer focus and shows the cursor again right away.",
+  "shell-version": ["50"],
+  "url": "https://github.com/hammedrz/v-touchpad"
+}

@@ -171,7 +171,9 @@ class VirtualMouse:
     gives no app pointer focus, so clicks only reach GNOME Shell (e.g. the dock).
     A pointer event brings both back, but only *after* that event is handled.
     `nudge()` sends a net-zero motion so the cursor is visible and focused before
-    the next button event, and stays visible after the fingers lift.
+    the next button event, and stays visible after the fingers lift. It can only
+    follow each touch, so the cursor still blinks while a finger moves; the GNOME
+    Shell helper in gnome-shell-extension/ stops that from inside the compositor.
     """
 
     def __init__(self) -> None:

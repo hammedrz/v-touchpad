@@ -10,6 +10,8 @@ APP_DIR="$DATA_HOME/$APP"
 BIN_DIR="$HOME/.local/bin"
 UDEV_RULE=/etc/udev/rules.d/60-$APP-uinput.rules
 QUIRKS=/etc/libinput/local-overrides.quirks
+EXT_UUID=v-touchpad@hammedrz.github.io
+EXT_DIR="$DATA_HOME/gnome-shell/extensions/$EXT_UUID"
 
 autostart=0
 system=ask
@@ -95,13 +97,43 @@ if ((autostart)); then
         "$BIN_DIR/$APP" "$APP" > "$CONFIG_HOME/autostart/$APP.desktop"
 fi
 
+relogin=0
+
+# --- GNOME Shell helper -----------------------------------------------------
+enable_gnome_extension() {
+    gnome-extensions enable "$EXT_UUID" 2>/dev/null && return 0
+    # GNOME only finds new extensions at login, so until then it reports this
+    # one as missing. List it as enabled for the next login instead.
+    local on off
+    on="$(gsettings get org.gnome.shell enabled-extensions)" || return 1
+    off="$(gsettings get org.gnome.shell disabled-extensions)" || return 1
+    if [[ "$on" != *"'$EXT_UUID'"* ]]; then
+        if [[ "$on" == *"'"* ]]; then on="${on%]}, '$EXT_UUID']"; else on="['$EXT_UUID']"; fi
+        gsettings set org.gnome.shell enabled-extensions "$on" || return 1
+    fi
+    if [[ "$off" == *"'$EXT_UUID'"* ]]; then
+        off="${off//", '$EXT_UUID'"/}"; off="${off//"'$EXT_UUID', "/}"; off="${off//"'$EXT_UUID'"/}"
+        gsettings set org.gnome.shell disabled-extensions "$off" || return 1
+    fi
+}
+
+if command -v gnome-shell >/dev/null; then
+    say "Installing the GNOME Shell helper, which stops the cursor flickering on the pad"
+    for file in metadata.json extension.js; do
+        cmp -s "$SRC/gnome-shell-extension/$file" "$EXT_DIR/$file" || relogin=1  # GNOME loads it at login
+    done
+    install -Dm 644 -t "$EXT_DIR" "$SRC/gnome-shell-extension/metadata.json" "$SRC/gnome-shell-extension/extension.js"
+    enable_gnome_extension || echo "    Could not turn it on. After logging in again, run: gnome-extensions enable $EXT_UUID"
+    [ "$(gsettings get org.gnome.shell disable-user-extensions 2>/dev/null)" = true ] \
+        && echo "    GNOME extensions are switched off; turn them on in the Extensions app for the helper to run."
+fi
+
 # --- System setup (sudo) ----------------------------------------------------
 need_rule=0
 [ -w /dev/uinput ] || need_rule=1
 need_quirk=1
 [ -f "$QUIRKS" ] && grep -q "^# BEGIN $APP" "$QUIRKS" && need_quirk=0
 
-relogin=0
 if ((need_rule || need_quirk)) && [ "$system" != no ]; then
     echo
     echo "System setup (needs sudo):"
@@ -130,5 +162,5 @@ fi
 
 echo
 say "Done. Open V-Touchpad from the app menu, or run: $APP"
-((relogin)) && echo "    Log out and back in first, so the system setup takes effect."
+((relogin)) && echo "    Log out and back in first, so the changes above take effect."
 case ":$PATH:" in *":$BIN_DIR:"*) ;; *) echo "    ($BIN_DIR is not on your PATH; the app menu entry still works.)" ;; esac

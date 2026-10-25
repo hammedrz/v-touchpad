@@ -3,6 +3,7 @@
 set -euo pipefail
 
 APP=v-touchpad
+EXT_UUID=v-touchpad@hammedrz.github.io
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 VERSION="$(sed -n 's/^VERSION = "\(.*\)"$/\1/p' "$ROOT/v_touchpad.py")"
 MAINTAINER="${DEB_MAINTAINER:-$(git -C "$ROOT" config user.name) <$(git -C "$ROOT" config user.email)>}"
@@ -19,6 +20,8 @@ install -Dm 644 "$ROOT/data/$APP.svg" "$PKG/usr/share/icons/hicolor/scalable/app
 install -Dm 644 "$ROOT/data/60-$APP-uinput.rules" "$PKG/usr/lib/udev/rules.d/60-$APP-uinput.rules"
 # libinput reads every *.quirks file in its data directory.
 install -Dm 644 "$ROOT/data/$APP.quirks" "$PKG/usr/share/libinput/90-$APP.quirks"
+install -Dm 644 -t "$PKG/usr/share/gnome-shell/extensions/$EXT_UUID" \
+    "$ROOT/gnome-shell-extension/metadata.json" "$ROOT/gnome-shell-extension/extension.js"
 
 mkdir -p "$PKG/usr/bin"
 cat > "$PKG/usr/bin/$APP" <<EOF
@@ -65,13 +68,17 @@ Description: on-screen touchpad for Linux touchscreens
  Includes a tray icon, light and dark themes, and start at login.
 EOF
 
-cat > "$PKG/DEBIAN/postinst" <<'EOF'
+cat > "$PKG/DEBIAN/postinst" <<EOF
 #!/bin/sh
 set -e
-if [ "$1" = configure ] && command -v udevadm >/dev/null 2>&1; then
+if [ "\$1" = configure ] && command -v udevadm >/dev/null 2>&1; then
     udevadm control --reload || true
     udevadm trigger --subsystem-match=misc --sysname-match=uinput || true
     echo "V-Touchpad: on 2-in-1s, log out and back in once so it keeps working in tablet mode."
+fi
+if [ "\$1" = configure ] && command -v gnome-shell >/dev/null 2>&1; then
+    echo "V-Touchpad: on GNOME, log out and back in, then run 'gnome-extensions enable $EXT_UUID'"
+    echo "            so the cursor stops flickering while you use the pad."
 fi
 EOF
 cat > "$PKG/DEBIAN/postrm" <<'EOF'
