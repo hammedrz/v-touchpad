@@ -1,6 +1,6 @@
 [project]
 name = "v-touchpad"
-version = "0.1.0"
+version = "0.1.1"
 description = "An on-screen touchpad for Linux touchscreens"
 readme = "README.md"
 license = "MIT"

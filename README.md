@@ -34,7 +34,7 @@ It needs a touchscreen, since the window only reacts to touch, and a desktop tha
 Download `v-touchpad_<version>_all.deb` from the [releases page](https://github.com/hammedrz/v-touchpad/releases) and install it with apt, which also pulls in the dependencies:
 
 ```sh
-sudo apt install ./v-touchpad_0.1.0_all.deb
+sudo apt install ./v-touchpad_0.1.1_all.deb
 ```
 
 The package also sets up `/dev/uinput` access and the tablet-mode exception for 2-in-1s, and installs the GNOME Shell helper. Log out and back in once afterwards. On GNOME, then turn the helper on, which stops the cursor flickering while you use the pad:
