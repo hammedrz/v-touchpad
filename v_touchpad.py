@@ -25,7 +25,7 @@ from PySide6.QtWidgets import (QApplication, QCheckBox, QMenu, QMessageBox, QSys
                                QWidget)
 
 APP_ID = "v-touchpad"
-VERSION = "0.1.1"
+VERSION = "0.1.2"
 DATA_DIR = Path(__file__).resolve().parent / "data"
 ICON_FILE = DATA_DIR / f"{APP_ID}.svg"
 TRAY_ICON_FILE = DATA_DIR / f"{APP_ID}-tray.svg"
