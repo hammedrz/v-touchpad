@@ -118,7 +118,7 @@ enable_gnome_extension() {
 }
 
 if command -v gnome-shell >/dev/null; then
-    say "Installing the GNOME Shell helper, which stops the cursor flickering on the pad"
+    say "Installing the GNOME Shell helper, which keeps the cursor steady and menus and drags working on the pad"
     for file in metadata.json extension.js; do
         cmp -s "$SRC/gnome-shell-extension/$file" "$EXT_DIR/$file" || relogin=1  # GNOME loads it at login
     done

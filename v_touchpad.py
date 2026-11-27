@@ -16,7 +16,9 @@ from pathlib import Path
 
 from evdev import AbsInfo, UInput, ecodes
 from evdev.uinput import UInputError
-from PySide6.QtCore import QEvent, QObject, QPoint, QPointF, QRectF, QSettings, Qt
+from PySide6.QtCore import (QEvent, QMargins, QObject, QPoint, QPointF, QRectF, QSettings, Qt, SLOT,
+                            Slot)
+from PySide6.QtDBus import QDBusConnection
 from PySide6.QtGui import QActionGroup, QColor, QEventPoint, QFont, QIcon, QPainter, QPalette, QPen
 from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtWidgets import (QApplication, QCheckBox, QMenu, QMessageBox, QSystemTrayIcon,
@@ -32,6 +34,11 @@ AUTOSTART_FILE = CONFIG_HOME / "autostart" / f"{APP_ID}.desktop"
 LAUNCHERS = {Path("/usr/share") / APP_ID: Path("/usr/bin") / APP_ID,  # .deb package
              Path.home() / ".local/share" / APP_ID: Path.home() / ".local/bin" / APP_ID}  # install.sh
 CLOSE_ACTIONS = {"ask": "Ask every time", "hide": "Hide to tray", "quit": "Quit"}
+# The GNOME Shell helper sends touches it takes from the pad window here (see ShellBridge).
+BRIDGE_NAME = "io.github.hammedrz.VTouchpad"
+BRIDGE_PATH = "/io/github/hammedrz/VTouchpad"
+SHELL_PHASES = {"begin": QEventPoint.State.Pressed, "update": QEventPoint.State.Updated,
+                "end": QEventPoint.State.Released, "cancel": QEventPoint.State.Released}
 
 SLOTS = 5
 RESOLUTION = 40  # device units per mm
@@ -210,12 +217,19 @@ class Touchpad(QWidget):
         self.debug = debug
         self.error = error
         self.speed = speed
-        self.scale = 1.0  # device units per widget pixel, refreshed on each TouchBegin
-        # Qt touch point id -> ("pad", slot) | ("button", code) | ("move", 0) | ("ignored", 0)
-        self.touches: dict[int, tuple[str, int]] = {}
+        self.scale = 1.0  # device units per widget pixel, refreshed when the first finger lands
+        # Fingers are keyed ("qt", touch point id) when Qt delivers them, or ("shell", slot)
+        # when the GNOME Shell helper does. Value: ("pad", slot) | ("button", code) |
+        # ("move", 0) | ("ignored", 0)
+        self.touches: dict[tuple[str, int], tuple[str, int]] = {}
         self.held: dict[int, int] = {}  # button code -> fingers holding it
-        self.drag: tuple[int, QPointF, QPoint] | None = None  # finger, start global pos, start window pos
-        self.fingers: dict[int, QPointF] = {}  # pad finger positions, drawn as feedback
+        # finger, start global pos, start window pos
+        self.drag: tuple[tuple[str, int], QPointF, QPoint] | None = None
+        self.fingers: dict[tuple[str, int], QPointF] = {}  # pad finger positions, drawn as feedback
+        # The GNOME Shell helper sends every touch on the pad (see ShellBridge);
+        # the window's own touch events are then duplicates, and GNOME cuts
+        # them off when an app starts a drag or opens a menu.
+        self.shell_active = False
         self.theme = theme  # "auto" follows the desktop; the toggle switches to light/dark
         QApplication.styleHints().colorSchemeChanged.connect(self.update)
         self.setWindowTitle("V-Touchpad")
@@ -314,48 +328,77 @@ class Touchpad(QWidget):
         return (self.pad.width / 2 + (pos.x() - centre.x()) * self.scale,
                 self.pad.height / 2 + (pos.y() - centre.y()) * self.scale)
 
-    def _press(self, point: QEventPoint) -> None:
-        pos = point.position()
+    def _press(self, key: tuple[str, int], pos: QPointF, global_pos: QPointF) -> None:
+        if not self.touches:
+            self.scale = self._units_per_px()
         pad = self.pad_rect()
         if pos.y() < pad.top() and self.toggle_rect().contains(pos):
-            self.touches[point.id()] = ("ignored", 0)
+            self.touches[key] = ("ignored", 0)
             self.toggle_theme()
         elif pos.y() < pad.top():
-            self.touches[point.id()] = ("move", 0)
+            self.touches[key] = ("move", 0)
             if len(self.touches) == 1:
                 if QApplication.platformName() == "xcb":
                     # GNOME ignores touch-started system moves of X11 windows,
                     # but X11 windows may move themselves.
-                    self.drag = (point.id(), point.globalPosition(), self.pos())
+                    self.drag = (key, global_pos, self.pos())
                 elif self.windowHandle():
                     self.windowHandle().startSystemMove()
         elif pos.y() > pad.bottom():
             code = ecodes.BTN_LEFT if pos.x() < self.width() / 2 else ecodes.BTN_RIGHT
-            self.touches[point.id()] = ("button", code)
+            self.touches[key] = ("button", code)
             self.held[code] = self.held.get(code, 0) + 1
             if self.held[code] == 1:
                 self.mouse.button(code, True)
                 self.update()
         else:
             slot = self.pad.touch_down(*self._to_device(pos))
-            self.touches[point.id()] = ("ignored", 0) if slot is None else ("pad", slot)
+            self.touches[key] = ("ignored", 0) if slot is None else ("pad", slot)
             if slot is not None:
-                self.fingers[point.id()] = pos
+                self.fingers[key] = pos
                 self.update()
 
-    def _release(self, point_id: int) -> None:
-        role, value = self.touches.pop(point_id, ("ignored", 0))
-        if self.drag and self.drag[0] == point_id:
+    def _move(self, key: tuple[str, int], pos: QPointF, global_pos: QPointF) -> None:
+        role, slot = self.touches[key]
+        if role == "pad":
+            self.pad.touch_move(slot, *self._to_device(pos))
+            self.fingers[key] = pos
+            self.update()
+        elif self.drag and self.drag[0] == key:
+            _, start, origin = self.drag
+            self.move(origin + (global_pos - start).toPoint())
+
+    def _release(self, key: tuple[str, int]) -> None:
+        role, value = self.touches.pop(key, ("ignored", 0))
+        if self.drag and self.drag[0] == key:
             self.drag = None
         if role == "pad":
             self.pad.touch_up(value)
-            self.fingers.pop(point_id, None)
+            self.fingers.pop(key, None)
             self.update()
         elif role == "button":
             self.held[value] -= 1
             if self.held[value] == 0:
                 self.mouse.button(value, False)
                 self.update()
+
+    def _handle_touch(self, points: list[tuple[tuple[str, int], QEventPoint.State, QPointF, QPointF]],
+                      stale: list[tuple[str, int]]) -> None:
+        """Forward one touch frame: releases `stale` fingers, then each (key, state, pos, global pos)."""
+        # This touchscreen event just hid the cursor and took pointer focus from
+        # every app. Nudge the mouse *before* sending any motion, scroll, button
+        # or tap event, so it reaches the app under the cursor.
+        self.mouse.nudge()
+        for key in stale:
+            self._release(key)
+        for key, state, pos, global_pos in points:
+            if state == QEventPoint.State.Released:
+                self._release(key)
+            elif key not in self.touches:
+                self._press(key, pos, global_pos)
+            elif state == QEventPoint.State.Updated:
+                self._move(key, pos, global_pos)
+        self.pad.sync()
 
     def event(self, event) -> bool:
         if event.type() not in TOUCH_EVENTS:
@@ -366,34 +409,86 @@ class Touchpad(QWidget):
         if self.debug:
             print(event.type().name, [(p.id(), p.state().name, round(p.position().x()), round(p.position().y()))
                                       for p in event.points()], file=sys.stderr)
-        if not (self.pad and self.mouse):
+        if not (self.pad and self.mouse) or self.shell_active:
             return True
-        # This touchscreen event just hid the cursor and took pointer focus from
-        # every app. Nudge the mouse *before* sending any motion, scroll, button
-        # or tap event, so it reaches the app under the cursor.
-        self.mouse.nudge()
-        if event.type() == QEvent.Type.TouchBegin:
-            self.scale = self._units_per_px()
+        stale = []
         if event.type() in (QEvent.Type.TouchBegin, QEvent.Type.TouchCancel):
-            for point_id in list(self.touches):  # stale or cancelled contacts
-                self._release(point_id)
-        if event.type() != QEvent.Type.TouchCancel:
-            for point in event.points():
-                if point.state() == QEventPoint.State.Released:
-                    self._release(point.id())
-                elif point.id() not in self.touches:
-                    self._press(point)
-                elif point.state() == QEventPoint.State.Updated:
-                    role, slot = self.touches[point.id()]
-                    if role == "pad":
-                        self.pad.touch_move(slot, *self._to_device(point.position()))
-                        self.fingers[point.id()] = point.position()
-                        self.update()
-                    elif self.drag and self.drag[0] == point.id():
-                        _, start, origin = self.drag
-                        self.move(origin + (point.globalPosition() - start).toPoint())
-        self.pad.sync()
+            # Fingers left over from an earlier sequence, or all of them when cancelled.
+            # GNOME cancels them, for example, when another app opens a menu.
+            stale = [key for key in self.touches if key[0] == "qt"]
+        points = [] if event.type() == QEvent.Type.TouchCancel else [
+            (("qt", p.id()), p.state(), p.position(), p.globalPosition()) for p in event.points()]
+        self._handle_touch(points, stale)
         return True
+
+    def set_shell_active(self, active: bool) -> None:
+        """The GNOME Shell helper starts or stops sending every touch on the pad."""
+        if self.debug:
+            print(f"ShellActive {active}", file=sys.stderr)
+        if active == self.shell_active:
+            return
+        self.shell_active = active
+        # The other source stops sending; let go of the fingers it still holds.
+        stale = [key for key in self.touches if key[0] == ("qt" if active else "shell")]
+        if stale and self.pad and self.mouse:
+            self._handle_touch([], stale)
+
+    def shell_touch(self, phase: str, slot: int, x: float, y: float) -> None:
+        """A touch the GNOME Shell helper passed on instead of the window (see ShellBridge).
+
+        `x` and `y` are fractions of the window contents' size as GNOME saw them
+        when the finger went down.
+        """
+        key = ("shell", slot)
+        state = SHELL_PHASES.get(phase)
+        if self.debug:
+            print(f"Shell{phase.title()} {slot} {x:.3f} {y:.3f}", file=sys.stderr)
+        # A finger that went down before the helper took over was released when
+        # GNOME cancelled it; ignore the rest of it.
+        if not (self.pad and self.mouse) or state is None or (
+                state != QEventPoint.State.Pressed and key not in self.touches):
+            return
+        margins = QMargins()
+        if QApplication.platformName() == "wayland" and self.windowHandle():
+            margins = self.windowHandle().frameMargins()  # Qt draws its own title bar there
+        pos = QPointF(x * (self.width() + margins.left() + margins.right()) - margins.left(),
+                      y * (self.height() + margins.top() + margins.bottom()) - margins.top())
+        stale = [key] if state == QEventPoint.State.Pressed and key in self.touches else []
+        # The helper measures each finger from where the window was when it went
+        # down, so `pos` also works as a fixed point for moving the window.
+        self._handle_touch([(key, state, pos, pos)], stale)
+
+
+class ShellBridge(QObject):
+    """Receives the touches on the pad from the GNOME Shell helper.
+
+    While an app's menu is open or a drag is under way, that app holds an input
+    grab: GNOME sends the pad no touches, lifting a finger from it closes the
+    menu, and fingers already on the pad are cancelled, which ends the drag.
+    The helper in gnome-shell-extension/ takes the pad's touches before any
+    grab sees them and sends them here as D-Bus signals, after an Active signal
+    that tells the window to ignore its own touch events. Owning BRIDGE_NAME
+    tells the helper we listen.
+    """
+
+    def __init__(self, window: Touchpad) -> None:
+        super().__init__(window)
+        self.window = window
+        bus = QDBusConnection.sessionBus()
+        # QtDBus delivers only signals sent by the owner of org.gnome.Shell.
+        if (bus.connect("org.gnome.Shell", BRIDGE_PATH, BRIDGE_NAME, "Active",
+                        self, SLOT("active(bool)"))
+                and bus.connect("org.gnome.Shell", BRIDGE_PATH, BRIDGE_NAME, "Touch",
+                                self, SLOT("touch(QString,int,double,double)"))):
+            bus.registerService(BRIDGE_NAME)
+
+    @Slot(bool)
+    def active(self, active: bool) -> None:
+        self.window.set_shell_active(active)
+
+    @Slot(str, int, float, float)
+    def touch(self, phase: str, slot: int, x: float, y: float) -> None:
+        self.window.shell_touch(phase, slot, x, y)
 
 
 class Controller(QObject):
@@ -588,6 +683,8 @@ def main() -> int:
     except (OSError, UInputError) as exc:
         error = f"Cannot create virtual input devices through /dev/uinput: {exc}"
     widget = Touchpad(pad, mouse, error, args.speed, args.debug, args.theme)
+    if pad and mouse:
+        ShellBridge(widget)  # the widget owns it
     controller = Controller(widget, server)
     app.setQuitOnLastWindowClosed(False)  # hiding the pad keeps the tray running
     if not (args.hidden and controller.tray):

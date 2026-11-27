@@ -54,7 +54,7 @@ Architecture: all
 Maintainer: $MAINTAINER
 Installed-Size: $(du -sk --exclude=DEBIAN "$PKG" | cut -f1)
 Depends: python3 (>= 3.10), python3-evdev, python3-pyside6.qtcore, python3-pyside6.qtgui (>= 6.5),
- python3-pyside6.qtwidgets, python3-pyside6.qtnetwork, qt6-svg-plugins,
+ python3-pyside6.qtwidgets, python3-pyside6.qtnetwork, python3-pyside6.qtdbus, qt6-svg-plugins,
  qt6-xdgdesktopportal-platformtheme
 Recommends: gnome-shell-extension-appindicator
 Section: utils
@@ -78,7 +78,7 @@ if [ "\$1" = configure ] && command -v udevadm >/dev/null 2>&1; then
 fi
 if [ "\$1" = configure ] && command -v gnome-shell >/dev/null 2>&1; then
     echo "V-Touchpad: on GNOME, log out and back in, then run 'gnome-extensions enable $EXT_UUID'"
-    echo "            so the cursor stops flickering while you use the pad."
+    echo "            so the cursor stays steady and menus and drags work on the pad."
 fi
 EOF
 cat > "$PKG/DEBIAN/postrm" <<'EOF'
